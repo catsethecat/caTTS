@@ -22,6 +22,8 @@ todo write rest of the desc and do all the things
 - Written in C as a native Windows application - doesn't depend on any third party libraries
 - Single standalone exe, no other files required besides a config file which is automatically created
 
+https://user-images.githubusercontent.com/45233053/161430141-5a7db369-a013-41e2-b647-1566b48c6442.mp4
+
 ### Setup
 1. todo
 2. write
