@@ -11,6 +11,7 @@
 - Automatically retrieve Twitch OAuth token and channel name from BeatSaberPlus (convenient for Beat Saber streamers)
 - Option to not read out URLs in chat
 - Option to not repeat username if the same user sends multiple messages in a row
+- Limit amount of chat emotes read
 - Nicknames for users
 - Custom voices per user
 - Replace words in chat messages
@@ -18,7 +19,8 @@
 - Read channel point redemptions
 - Sound Effects feature can play a sound file on specific redeems
 - Automatically shoutout raiders (sends the !so command in chat)
-- Minimalist software, low resource use
+- Change volume and sound output device for TTS and sound effects separately
+- Minimalist software, low resource use compared to browser based solutions
 - Written in C as a native Windows application - doesn't depend on any third party libraries
 - Single standalone exe, no other files required besides a config file which is automatically created
 
