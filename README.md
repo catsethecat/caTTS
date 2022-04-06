@@ -2,7 +2,7 @@
 
 #
 
-### This is my personal TTS client which I use in some of my twitch streams and add whatever random features I want to it
+### This is my personal TTS client which I use in some of my twitch streams and add whatever random features I want to it, will be released here later after a bit more work
 
 #
 
