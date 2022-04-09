@@ -36,5 +36,6 @@ https://user-images.githubusercontent.com/45233053/161430141-5a7db369-a013-41e2-
 - Download the application from [Releases](https://github.com/catsethecat/caTTS/releases) or build it from source code
 - Run it and click the **Config** button. It should open the configuration file in a text editor.
 - The Azure section requires your subscription key and region. Twitch section requires your Channel ID. OauthToken and ChannelName are required if BSPlusConfig is not valid.
-- Save and close the configuration file and click the **Reload** button in caTTS.
+- Save the configuration file and click the **Reload** button in caTTS.
 - If the configuration is correct and everything works then both thread statuses should say **listening**
+- A list of available voices can be found [here](https://docs.microsoft.com/en-us/azure/cognitive-services/speech-service/language-support?tabs=speechtotext#prebuilt-neural-voices)
