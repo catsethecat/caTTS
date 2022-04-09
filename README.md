@@ -1,8 +1,8 @@
-![image](https://cdn.discordapp.com/attachments/915012763263316019/960141213107904522/catts_banner.png)
+![image](https://media.discordapp.net/attachments/915012763263316019/962263569267822602/catts_banner_1000.png)
 
 #
 
-### This is my personal TTS client which I use in some of my twitch streams and add whatever random features I want to it, will be released here later after a bit more work
+### <p align=center>This is my personal TTS client which I've been using in some of my twitch streams</p>
 
 #
 
@@ -21,8 +21,7 @@
 - Automatically shoutout raiders (sends the !so command in chat)
 - Change volume and sound output device for TTS and sound effects separately
 - Minimalist software, low resource use compared to browser based solutions
-- Written in C as a native Windows application - doesn't depend on any third party libraries
-- Single standalone exe, no other files required besides a config file which is automatically created
+- Single standalone 32kb exe, no other files required besides a config file which is automatically created
 
 https://user-images.githubusercontent.com/45233053/161430141-5a7db369-a013-41e2-b647-1566b48c6442.mp4
 
