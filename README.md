@@ -1,10 +1,6 @@
 ![image](https://media.discordapp.net/attachments/915012763263316019/962263569267822602/catts_banner_1000.png)
 
-#
 
-### <p align=center>This is my personal TTS client which I've been using in some of my twitch streams</p>
-
-#
 
 ## Feature overview
 - High quality neural TTS voices from Azure Cognitive Services Speech Service
@@ -21,7 +17,7 @@
 - Automatically shoutout raiders (sends the !so command in chat)
 - Change volume and sound output device for TTS and sound effects separately
 - Minimalist software, low resource use compared to browser based solutions
-- Single standalone 32kb exe, no other files required besides a config file which is automatically created
+- Single standalone exe, no other files required besides a config file which is automatically created
 
 https://user-images.githubusercontent.com/45233053/161430141-5a7db369-a013-41e2-b647-1566b48c6442.mp4
 
@@ -35,7 +31,7 @@ https://user-images.githubusercontent.com/45233053/161430141-5a7db369-a013-41e2-
 ### Setup
 - Download the application from [Releases](https://github.com/catsethecat/caTTS/releases) or build it from source code
 - Run it and click the **Config** button. It should open the configuration file in a text editor.
-- The Azure section requires your subscription key and region. Twitch section requires your Channel ID. OauthToken and ChannelName are required if BSPlusConfig is not valid.
+- The Azure section requires your subscription key and region. Twitch section requires your Channel ID. OauthToken and ChannelName are required if BSPlusConfig is not valid. Rest of the config options should be self explanatory.
 - Save the configuration file and click the **Reload** button in caTTS.
 - If the configuration is correct and everything works then both thread statuses should say **listening**
 - A list of available voices can be found [here](https://docs.microsoft.com/en-us/azure/cognitive-services/speech-service/language-support?tabs=speechtotext#prebuilt-neural-voices)
