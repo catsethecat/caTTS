@@ -131,8 +131,10 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 		if (strstr(payload, "reward-redeemed")) {
 			char* username = strstr(payload, "\\\"login\\\":\\\"") + 12;
 			char* title = strstr(payload, "\\\"title\\\":\\\"") + 12;
+			char* cost = strstr(payload, "\\\"cost\\\":") + 9;
 			*strchr(username, '\\') = 0;
 			*strchr(title, '\\') = 0;
+			*strchr(cost, ',') = 0;
 			char* nickname = iniGetValue(&config, "Nicknames", username);
 			if (nickname)
 				username = nickname;
@@ -141,7 +143,18 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 				play_sound(soundPath, NULL, str_getint(iniGetValue(&config, "Misc", "SoundEffectVolume")), iniGetValue(&config, "Misc", "EffectPlaybackDevice"));
 				continue;
 			}
-			ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), "+0Hz",3, username, " redeemed ", title);
+			char* format = iniGetValue(&config, "RedeemMessages", title);
+			if(!format)
+				format = iniGetValue(&config, "RedeemMessages", "Default");
+			if (!format || !*format)
+				continue;
+			char* tmp = buf + 65000;
+			*tmp = 0;
+			str_cat(tmp, format);
+			strrep(tmp, "%name", username);
+			strrep(tmp, "%item", title);
+			strrep(tmp, "%cost", cost);
+			ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), "+0Hz",1, tmp);
 		}
 	}
 	Thread1End:
@@ -184,19 +197,15 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 		if (sslsock_connect(&ircsock, "irc.chat.twitch.tv", "6697") != 0)
 			continue;
 		buf[0] = 0;
-		int len = str_vacat(buf, 6, "PASS ", iniGetValue(&config, "Twitch", "OAuthToken"), "\r\n", "NICK ", iniGetValue(&config, "Twitch", "Channel"), "\r\nCAP REQ :twitch.tv/tags twitch.tv/commands\r\n");
+		int len = str_vacat(buf, 8, "PASS ", iniGetValue(&config, "Twitch", "OAuthToken"), "\r\n", "NICK ", iniGetValue(&config, "Twitch", "Channel"), "\r\nCAP REQ :twitch.tv/tags twitch.tv/commands\r\nJOIN #", iniGetValue(&config, "Twitch", "Channel"), "\r\n");
 		if (sslsock_send(&ircsock, buf, len) != 0)
 			continue;
-		char tmp[256] = { 0 };
-		len = str_vacat(tmp, 3, ":tmi.twitch.tv 001 ", iniGetValue(&config, "Twitch", "Channel"), " :Welcome, GLHF!");
-		if (sslsock_recv(&ircsock, buf, 65536) == 0)
+		if (!(len = sslsock_recv(&ircsock, buf, 65536)))
 			continue;
-		if (memcmp(buf, tmp, len) != 0)
+		buf[len] = 0;
+		if (strstr(buf,":Welcome, GLHF!") == 0)
 			goto Thread2End;
 		SetWindowText(label1, "   chat: listening              ");
-		tmp[0] = 0;
-		len = str_vacat(tmp, 3, "JOIN #", iniGetValue(&config, "Twitch", "Channel"), "\r\n");
-		sslsock_send(&ircsock, tmp, len);
 		char lastSpeakerName[32] = { 0 };
 		ULONGLONG lastSpeakerTime = 0;
 		for (int recvLen = 0; recvLen = sslsock_recv(&ircsock, buf, 65536);) {
@@ -211,14 +220,24 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 				}
 				if (strstr((char*)ircLineStart, "USERNOTICE") != 0) {
 					if (strstr(ircLineStart, "msg-id=raid") != 0) {
+						char* name = strstr(ircLineStart, "msg-param-login=") + 16;
+						char* viewerCount = strstr(ircLineStart, "msg-param-viewerCount=") + 22;
+						*strchr(name, ';') = 0;
+						*strchr(viewerCount, ';') = 0;
 						char* raidResponse = iniGetValue(&config, "Misc", "RaidChatResponse");
-						if (raidResponse) {
-							char* name = strstr(ircLineStart, "msg-param-login=") + 16;
-							*strchr(name, ';') = 0;
-							tmp[0] = 0;
+						if (raidResponse && *raidResponse) {
+							char tmp[256] = { 0 };
 							len = str_vacat(tmp, 5, "PRIVMSG #", iniGetValue(&config, "Twitch", "Channel"), " :", raidResponse, "\r\n");
 							strrep(tmp, "%name", name);
 							sslsock_send(&ircsock, tmp, (unsigned int)strlen(tmp));
+						}
+						char* raidMessage = iniGetValue(&config, "Misc", "RaidMessage");
+						if (raidMessage && *raidMessage) {
+							char tmp[256] = { 0 };
+							str_cat(tmp, raidMessage);
+							strrep(tmp, "%name", name);
+							strrep(tmp, "%num", viewerCount);
+							ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), "+0Hz", 1, tmp);
 						}
 					}
 					continue;
@@ -274,6 +293,7 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 						}
 					}
 					message[writePos] = 0;
+					lowercase(message);
 					//select voice
 					char* voice;
 					char* pitchOffset = "+0Hz";
@@ -305,10 +325,8 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					str_cat(lastSpeakerName, name);
 					lastSpeakerTime += dt;
 					//apply word replacements
-					for (int i = 0; config.sections[i]; i++)
-						if (strcmp(config.sections[i]->name, "WordReplacements") == 0)
-							for (int j = 0; config.sections[i]->keyvalues[j]; j += 2)
-								strrep(message, config.sections[i]->keyvalues[j], config.sections[i]->keyvalues[j + 1]);
+					for (inikeyvalue* kv = iniGetSection(&config, "WordReplacements"); kv->key; kv++)
+						strrep(message, kv->key, kv->value);
 					//remove urls
 					if (strcmp("True", iniGetValue(&config, "Misc", "BlockUrls")) == 0) {
 						char* cutStart = 0;
@@ -344,6 +362,11 @@ void Reload() {
 		int iRes = iniSetValue(&config, "Twitch", "OAuthToken", iniGetValue(&bspConfig, "Twitch", "Twitch.OAuthToken"));
 		iRes = iniSetValue(&config, "Twitch", "Channel", iniGetValue(&bspConfig, "Twitch", "Twitch.Channels"));
 	}
+	lowercase(iniGetValue(&config, "Twitch", "Channel"));
+	for (inikeyvalue* kv = iniGetSection(&config, "Nicknames"); kv->key; kv++) lowercase(kv->key);
+	for (inikeyvalue* kv = iniGetSection(&config, "WordReplacements"); kv->key; kv++) lowercase(kv->key);
+	for (inikeyvalue* kv = iniGetSection(&config, "UserVoices"); kv->key; kv++) lowercase(kv->key);
+	for (inikeyvalue* kv = iniGetSection(&config, "MutedUsers"); kv->key; kv++) lowercase(kv->key);
 	//clear tts buffer
 	for (int i = 0; i < TTS_QUEUE_COUNT; i++)
 		ttsQueue[i].message[0] = 0;
@@ -406,7 +429,7 @@ void WinMainCRTStartup(){
 		"\n"
 		"[Twitch]\n"
 		"OAuthToken = oauth:000000000000000000000000000000\n"
-		"Channel = channel_name_lowercase\n"
+		"Channel = channel_name\n"
 		"ChannelID = 123456789\n"
 		"BSPlusConfig = C:\\Users\\Example User\\AppData\\Local\\.beatsaberpluschatcore\\auth.ini\n"
 		"\n"
@@ -420,6 +443,7 @@ void WinMainCRTStartup(){
 		"VoiceVolume = 0 ;Volumes are a number between -10000 and 0\n"
 		"SoundEffectVolume = 0\n"
 		"RaidChatResponse = !so %name\n"
+		"RaidMessage = %name raided the channel with %num viewers\n"
 		"\n"
 		"[Nicknames]\n"
 		"example_username = nickname\n"
@@ -435,6 +459,10 @@ void WinMainCRTStartup(){
 		"\n"
 		"[SoundEffects]\n"
 		"Reward Name = path\\to\\soundfile.wav ;only supports wav files\n"
+		"\n"
+		"[RedeemMessages]\n"
+		"Default = %name redeemed %item for %cost points\n"
+		"Reward Name = unique message\n"
 		};
 		DWORD numWritten;
 		WriteFile(hFile, defaultConfig, (DWORD)strlen(defaultConfig), &numWritten, NULL);

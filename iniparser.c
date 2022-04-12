@@ -1,8 +1,12 @@
 
+typedef struct {
+	char* key;
+	char* value;
+}inikeyvalue;
 
 typedef struct {
 	char* name;
-	char** keyvalues;
+	inikeyvalue* keyvalues;
 }inisection;
 
 typedef struct {
@@ -42,23 +46,30 @@ PTR sect1
 NULLPTR
 */
 
+inikeyvalue* iniGetSection(inifile* ini, char* sectionName) {
+	for (inisection** section = ini->sections; *section; section++)
+		if (strcmp((*section)->name, sectionName) == 0)
+			return (*section)->keyvalues;
+	return 0;
+}
+
 char* iniGetValue(inifile* ini, char* section, char* key) {
-	for (int i = 0; ini->sections[i]; i++)
-		if (strcmp(ini->sections[i]->name, section) == 0)
-			for (int j = 0; ini->sections[i]->keyvalues[j]; j += 2)
-				if (strcmp(ini->sections[i]->keyvalues[j], key) == 0)
-					return ini->sections[i]->keyvalues[j+1];
+	inikeyvalue* kv = iniGetSection(ini, section);
+	if (kv)
+		for (; kv->key; kv++)
+			if (strcmp(kv->key, key) == 0)
+				return kv->value;
 	return 0;
 }
 
 int iniSetValue(inifile* ini, char* section, char* key, char* value) {
-	for (int i = 0; ini->sections[i]; i++)
-		if (strcmp(ini->sections[i]->name, section) == 0)
-			for (int j = 0; ini->sections[i]->keyvalues[j]; j += 2)
-				if (strcmp(ini->sections[i]->keyvalues[j], key) == 0) {
-					ini->sections[i]->keyvalues[j + 1] = value;
-					return 0;
-				}
+	inikeyvalue* kv = iniGetSection(ini, section);
+	if (kv)
+		for (; kv->key; kv++)
+			if (strcmp(kv->key, key) == 0) {
+				kv->value = value;
+				return 0;
+			}
 	return -1;
 }
 
@@ -105,7 +116,7 @@ inifile iniParse(char* filePath) {
 		nextLine += nextLine != 0;
 		int lineLen = nextLine ? (int)(nextLine - line) : fileSize - (int)(line - fileContents);
 		//remove \r and \n from the end
-		lineLen -= (line[lineLen - 2] == '\r') + 1;
+		lineLen -= (line[lineLen - 2] == '\r') + (line[lineLen - 1] == '\n');
 		line[lineLen] = 0;
 		//remove comments
 		char* comment = strchr(line, ';');
@@ -122,6 +133,7 @@ inifile iniParse(char* filePath) {
 		if (line[0] == '[') {
 			line[lineLen - 1] = 0;
 			memcpy(writePos, line + 1, lineLen - 1);
+			ptrIndex++;
 			ptrs[ptrIndex] = writePos;
 			sectionPtr--;
 			*sectionPtr = (char*)(&ptrs[ptrIndex]);

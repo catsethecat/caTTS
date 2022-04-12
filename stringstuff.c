@@ -65,6 +65,14 @@ int strcmp(const char* str1, const char* str2) {
 	return diff;
 }
 
+#pragma function(strlen)
+size_t strlen(const char* str) {
+	size_t len = 0;
+	while (*(str++))
+		len++;
+	return len;
+}
+
 void* malloc(size_t size) {
 	return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 }
@@ -136,4 +144,11 @@ void strrep(char* str, char* find, char* replace) {
 		memcpy(found, replace, repLen);
 		found += repLen;
 	}
+}
+
+char* lowercase(char* str) {
+	for (char* c = str; *c; c++)
+		if (*c >= 'A' && *c <= 'Z')
+			*c += 32;
+	return str;
 }
