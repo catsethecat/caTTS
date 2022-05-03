@@ -16,8 +16,8 @@
 - Sound Effects feature can play a sound file on specific redeems
 - Automatically shoutout raiders (sends the !so command in chat)
 - Change volume and sound output device for TTS and sound effects separately
-- Minimalist software, low resource use compared to browser based solutions
-- Single standalone exe, no other files required besides a config file which is automatically created
+- Low resource use compared to browser based solutions
+- 28 KB standalone exe, no other files required besides a config file which is automatically created
 
 https://user-images.githubusercontent.com/45233053/161430141-5a7db369-a013-41e2-b647-1566b48c6442.mp4
 
@@ -25,13 +25,13 @@ https://user-images.githubusercontent.com/45233053/161430141-5a7db369-a013-41e2-
 
 ### Prerequisites
 - Azure subscription - [Create one for free](https://azure.microsoft.com/free/cognitive-services)
-- [Create a Speech resource](https://ms.portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices) in the Azure portal. You can use the free pricing tier (F0) which gives you 500,000 characters free per month.
+- [Create a Speech resource](https://ms.portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices) in the Azure portal. You can use the free pricing tier (F0) which gives you [500,000 characters free per month](https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/).
 - Get the subscription key and region by viewing the resource in Azure Portal and managing keys
 
 ### Setup
 - Download the application from [Releases](https://github.com/catsethecat/caTTS/releases) or build it from source code
 - Run it and click the **Config** button. It should open the configuration file in a text editor.
-- The Azure section requires your subscription key and region. Twitch section requires your Channel ID. OauthToken and ChannelName are required if BSPlusConfig is not valid. Rest of the config options should be self explanatory.
+- The Azure section requires your subscription key and region. Twitch section requires your numerical Channel ID. OauthToken and ChannelName are required if BSPlusConfig is not valid. Rest of the config options should be self explanatory.
 - Save the configuration file and click the **Reload** button in caTTS.
 - If the configuration is correct and everything works then both thread statuses should say **listening**
 - A list of available voices can be found [here](https://docs.microsoft.com/en-us/azure/cognitive-services/speech-service/language-support?tabs=speechtotext#prebuilt-neural-voices)
