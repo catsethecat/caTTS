@@ -193,8 +193,10 @@ int sslsock_recv( sslsocket* psslsock, unsigned char* buf, int buflen) {
 /*
  * returns: number of bytes received or 0 if connection was closed by server
  */
-int sslsock_recv_http( sslsocket* psslsock, unsigned char* buf, int buflen) {
-    int totalReceived = 0, chunked = 0, target = 0, res = 0, offset = 0;
+unsigned int sslsock_recv_http( sslsocket* psslsock, unsigned char* buf, unsigned int buflen) {
+    buflen--;
+    int res = 0;
+    unsigned int totalReceived = 0, chunked = 0, target = 0, offset = 0;
     char* content = 0, * pCharTemp;
     while ((res = sslsock_recv(psslsock, buf + totalReceived, buflen - totalReceived)) > 0) {
         totalReceived += res;
@@ -203,7 +205,7 @@ int sslsock_recv_http( sslsocket* psslsock, unsigned char* buf, int buflen) {
             chunked = (strstr(buf, "Transfer-Encoding: chunked") != 0);
             if (pCharTemp = strstr(buf, "Content-Length:"))
                 target = str_getint(pCharTemp + 16);//sscanf_s(pCharTemp + 16, "%i", &target);
-            target = chunked * (int)(content - buf + 4);
+            target += (int)(content - buf + 4);
         }
         while (chunked && totalReceived > target) {
             int value = 0, hexlen = 0;
