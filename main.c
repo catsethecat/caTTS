@@ -243,7 +243,9 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					continue;
 				}
 				if (strstr((char*)ircLineStart, "PRIVMSG") != 0) {
-					char* name = strchr((char*)ircLineStart, ' ') + 2;
+					char* name = strstr(ircLineStart, " :") + 2;
+					if(name == (char*)2)
+						name = strchr(ircLineStart, ':') + 1;
 					char* message = strchr(name, ':') + 1;
 					*(message - 1) = ' ';
 					memcpy(ircLineEnd, " ", 2);
@@ -257,20 +259,22 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					int emoteCount = 0;
 					int allowedEmoteCount = str_getint(iniGetValue(&config, "Misc", "ReadEmotesCount"));
 					char* emotes = strstr(ircLineStart, "emotes=") + 7;
-					*(strchr(emotes, ';') + 1) = 0;
-					if (emotes[0]) {
-						for (char* c = emotes; c = strchr(c + 1, '-'); emoteCount++) {
-							if (emoteCount >= allowedEmoteCount) {
-								char* index = c - 1;
-								while (*index >= '0' && *index <= '9') index--;
-								*c = 0;
-								int startIndex = str_getint(index + 1);
-								index = c + 1;
-								while (*index >= '0' && *index <= '9') index++;
-								*index = 0;
-								int endIndex = str_getint(c + 1);
-								memset(message + startIndex, 1, endIndex - startIndex + 1);
-								c = index;
+					if (emotes > (char*)7) {
+						*(strchr(emotes, ';') + 1) = 0;
+						if (emotes[0]) {
+							for (char* c = emotes; c = strchr(c + 1, '-'); emoteCount++) {
+								if (emoteCount >= allowedEmoteCount) {
+									char* index = c - 1;
+									while (*index >= '0' && *index <= '9') index--;
+									*c = 0;
+									int startIndex = str_getint(index + 1);
+									index = c + 1;
+									while (*index >= '0' && *index <= '9') index++;
+									*index = 0;
+									int endIndex = str_getint(c + 1);
+									memset(message + startIndex, 1, endIndex - startIndex + 1);
+									c = index;
+								}
 							}
 						}
 					}
@@ -412,9 +416,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
 	return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-//int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hInstPrev, PSTR cmdline, int cmdshow){
-void WinMainCRTStartup(){
-
+#ifdef _DEBUG
+int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hInstPrev, PSTR cmdline, int cmdshow) {
+#else
+void WinMainCRTStartup() {
+#endif
 	if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, (LPSTR)configPath) != S_OK)
 		fatalError("failed to get appdata path");
 	str_cat(configPath, "\\Catse");
