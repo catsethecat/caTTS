@@ -218,38 +218,12 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					sslsock_send(&ircsock, ircLineStart, (int)strlen(ircLineStart));
 					continue;
 				}
-				if (strstr((char*)ircLineStart, "USERNOTICE") != 0) {
-					if (strstr(ircLineStart, "msg-id=raid") != 0) {
-						char* name = strstr(ircLineStart, "msg-param-login=") + 16;
-						char* viewerCount = strstr(ircLineStart, "msg-param-viewerCount=") + 22;
-						*strchr(name, ';') = 0;
-						*strchr(viewerCount, ';') = 0;
-						char* raidResponse = iniGetValue(&config, "Misc", "RaidChatResponse");
-						if (raidResponse && *raidResponse) {
-							char tmp[256] = { 0 };
-							len = str_vacat(tmp, 5, "PRIVMSG #", iniGetValue(&config, "Twitch", "Channel"), " :", raidResponse, "\r\n");
-							strrep(tmp, "%name", name);
-							sslsock_send(&ircsock, tmp, (unsigned int)strlen(tmp));
-						}
-						char* raidMessage = iniGetValue(&config, "Misc", "RaidMessage");
-						if (raidMessage && *raidMessage) {
-							char tmp[256] = { 0 };
-							str_cat(tmp, raidMessage);
-							strrep(tmp, "%name", name);
-							strrep(tmp, "%num", viewerCount);
-							ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), "+0Hz", 1, tmp);
-						}
-					}
-					continue;
-				}
 				if (strstr((char*)ircLineStart, "PRIVMSG") != 0) {
-					char* name = strstr(ircLineStart, " :") + 2;
-					if(name == (char*)2)
-						name = strchr(ircLineStart, ':') + 1;
+					char* name = strchr(ircLineStart, '!') + 1;
 					char* message = strchr(name, ':') + 1;
 					*(message - 1) = ' ';
 					memcpy(ircLineEnd, " ", 2);
-					*strchr(name, '!') = 0;
+					*strchr(name, '@') = 0;
 					//skip if necessary
 					if (message[0] == '!')
 						continue;
@@ -345,6 +319,30 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					}
 					//
 					ttsAddMessage(voice, pitchOffset, 3, msgPrefix, " ", message);
+				}
+				if (strstr((char*)ircLineStart, "USERNOTICE") != 0) {
+					if (strstr(ircLineStart, "msg-id=raid") != 0) {
+						char* name = strstr(ircLineStart, "msg-param-login=") + 16;
+						char* viewerCount = strstr(ircLineStart, "msg-param-viewerCount=") + 22;
+						*strchr(name, ';') = 0;
+						*strchr(viewerCount, ';') = 0;
+						char* raidResponse = iniGetValue(&config, "Misc", "RaidChatResponse");
+						if (raidResponse && *raidResponse) {
+							char tmp[256] = { 0 };
+							len = str_vacat(tmp, 5, "PRIVMSG #", iniGetValue(&config, "Twitch", "Channel"), " :", raidResponse, "\r\n");
+							strrep(tmp, "%name", name);
+							sslsock_send(&ircsock, tmp, (unsigned int)strlen(tmp));
+						}
+						char* raidMessage = iniGetValue(&config, "Misc", "RaidMessage");
+						if (raidMessage && *raidMessage) {
+							char tmp[256] = { 0 };
+							str_cat(tmp, raidMessage);
+							strrep(tmp, "%name", name);
+							strrep(tmp, "%num", viewerCount);
+							ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), "+0Hz", 1, tmp);
+						}
+					}
+					continue;
 				}
 			}
 		}
