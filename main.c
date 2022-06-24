@@ -208,6 +208,7 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 		SetWindowText(label1, "   chat: listening              ");
 		char lastSpeakerName[32] = { 0 };
 		ULONGLONG lastSpeakerTime = 0;
+		char* ircMsgType = 0;
 		for (int recvLen = 0; recvLen = sslsock_recv(&ircsock, buf, 65536);) {
 			buf[recvLen] = 0;
 			for (char* ircLineStart = buf, *ircLineEnd; ircLineEnd = strchr(ircLineStart,'\r'); ircLineStart = ircLineEnd + 2) {
@@ -218,12 +219,12 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					sslsock_send(&ircsock, ircLineStart, (int)strlen(ircLineStart));
 					continue;
 				}
-				if (strstr((char*)ircLineStart, "PRIVMSG") != 0) {
-					char* name = strchr(ircLineStart, '!') + 1;
-					char* message = strchr(name, ':') + 1;
+				if (ircMsgType = strstr((char*)ircLineStart, "PRIVMSG")) {
+					char* name = rstrchr(ircLineStart, ircMsgType, '@') + 1;
+					char* message = strchr(ircMsgType, ':') + 1;
 					*(message - 1) = ' ';
 					memcpy(ircLineEnd, " ", 2);
-					*strchr(name, '@') = 0;
+					*strchr(name, '.') = 0;
 					//skip if necessary
 					if (message[0] == '!')
 						continue;
@@ -320,7 +321,7 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					//
 					ttsAddMessage(voice, pitchOffset, 3, msgPrefix, " ", message);
 				}
-				if (strstr((char*)ircLineStart, "USERNOTICE") != 0) {
+				if (ircMsgType = strstr((char*)ircLineStart, "USERNOTICE")) {
 					if (strstr(ircLineStart, "msg-id=raid") != 0) {
 						char* name = strstr(ircLineStart, "msg-param-login=") + 16;
 						char* viewerCount = strstr(ircLineStart, "msg-param-viewerCount=") + 22;

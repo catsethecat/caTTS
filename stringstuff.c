@@ -86,6 +86,11 @@ char* strchr(const char* str, int character) {
 	return (*str == (char)character) ? (char*)str : 0;
 }
 
+char* rstrchr(const char* str, const char* searchPos, int character) {
+	for (; searchPos >= str && *searchPos != (char)character; searchPos--);
+	return (*searchPos == (char)character) ? (char*)searchPos : 0;
+}
+
 int ipow(int base, int exponent) {
 	if (!exponent)
 		return 1;
