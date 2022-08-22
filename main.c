@@ -306,6 +306,8 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					//apply word replacements
 					for (inikeyvalue* kv = iniGetSection(&config, "WordReplacements"); kv->key; kv++)
 						strrep(message, kv->key, kv->value);
+					strrep(message, "&", "&amp;");
+					strrep(message, "<", "&lt;");
 					//remove urls
 					if (strcmp("True", iniGetValue(&config, "Misc", "BlockUrls")) == 0) {
 						char* cutStart = 0;
