@@ -3,6 +3,7 @@
 #define TTS_MAX_MESSAGE_LEN 1024
 
 #include <windows.h>
+#include <windowsx.h>
 #include <shellapi.h>
 #include <ShlObj.h>
 
@@ -27,16 +28,24 @@ ttsMessage ttsQueue[TTS_QUEUE_COUNT];
 int tts_playback_pos = 0;
 int tts_last_message_pos = 0;
 int ttsBusy = 0;
-char configPath[MAX_PATH];
-HWND label1;
-HWND label2;
+char configFolder[MAX_PATH];
+HMENU hMenu;
+char* statusLines[2] = {"line0", "line1"};
 HANDLE hThread0;
 HANDLE hThread1;
 HANDLE hThread2;
 sslsocket ircsock;
 sslsocket pubsock;
 inifile config;
-inifile bspConfig;
+int voiceDeviceId;
+int effectDeviceId;
+
+/*
+	-add option to limit tts message length
+	-add chat commands to allow moderators to control tts
+	-fix jank and better error checking
+	-other stuff i forgor
+*/
 
 void fatalError(char* msg) {
 	MessageBoxA(NULL, msg, "fatal error", 0);
@@ -54,7 +63,7 @@ void ttsThread() {
 			iniGetValue(&config, "Azure", "SubscriptionKey"),
 			iniGetValue(&config, "Azure", "Region"),
 			str_getint(iniGetValue(&config, "Misc", "VoiceVolume")),
-			iniGetValue(&config, "Misc", "VoicePlaybackDevice"));
+			voiceDeviceId);
 
 		ttsQueue[tts_playback_pos].message[0] = 0;
 		tts_playback_pos = (tts_playback_pos + 1) % TTS_QUEUE_COUNT;
@@ -76,6 +85,12 @@ void ttsAddMessage(char* voice, char* pitch, int argc, ...) {
 	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ttsThread, NULL, 0, NULL);
 }
 
+// string must be static its never copied atm
+void updateContextMenuLine(int line, char* string) {
+	statusLines[line] = string;
+	ModifyMenuA(hMenu, line, MF_STRING | MF_DISABLED, 0, statusLines[line]);
+}
+
 DWORD WINAPI Thread0(LPVOID lpParam) {
 	while (1) {
 		Sleep(60000);
@@ -86,7 +101,7 @@ DWORD WINAPI Thread0(LPVOID lpParam) {
 }
 
 DWORD WINAPI Thread1(LPVOID lpParam) {
-	SetWindowText(label2, "redeems: connecting          ");
+	updateContextMenuLine(1, "redeems: connecting...");
 	sslsock_disconnect(&pubsock);
 	if (sslsock_connect(&pubsock, "pubsub-edge.twitch.tv", "443") != 0)
 		goto Thread1End;
@@ -102,7 +117,7 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 	int iRes = sslsock_recv(&pubsock, buf, 65536);
 	if (memcmp(buf, "HTTP/1.1 101 Switching Protocols", 32) != 0)
 		goto Thread1End;
-	char* pass = iniGetValue(&config, "Twitch", "OAuthToken") + 6;
+	char* pass = iniGetValue(&config, "Twitch", "OAuthToken");
 	*(buf + 8) = 0;
 	unsigned short dataLen = (unsigned short)str_vacat(buf + 8, 5, "{\"type\": \"LISTEN\",\"nonce\": \"44h1k13746815ab1r2\",\"data\": {\"topics\": [\"channel-points-channel-v1.",
 	iniGetValue(&config, "Twitch", "ChannelID"),"\"],\"auth_token\": \"",pass,"\"}}");
@@ -121,12 +136,12 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 			char* err = strstr(payload, "\"error\":\"") + 9;
 			*strchr(err, '\"') = 0;
 			if (*err) {
-				buf[0] = 0;
-				str_vacat(buf, 2, "redeems: ", err);
-				SetWindowText(label2, buf);
+				//buf[0] = 0;
+				//str_vacat(buf, 2, "redeems: ", err);
+				updateContextMenuLine(1, "redeems: error");
 				return 0;
 			}
-			SetWindowText(label2, "redeems: listening           ");
+			updateContextMenuLine(1, "redeems: connected");
 		}
 		if (strstr(payload, "reward-redeemed")) {
 			char* username = strstr(payload, "\\\"login\\\":\\\"") + 12;
@@ -140,7 +155,7 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 				username = nickname;
 			char* soundPath = iniGetValue(&config, "SoundEffects", title);
 			if (soundPath) {
-				play_sound(soundPath, NULL, str_getint(iniGetValue(&config, "Misc", "SoundEffectVolume")), iniGetValue(&config, "Misc", "EffectPlaybackDevice"));
+				ds_playsound(effectDeviceId, soundPath, NULL, str_getint(iniGetValue(&config, "Misc", "SoundEffectVolume")));
 				continue;
 			}
 			char* format = iniGetValue(&config, "RedeemMessages", title);
@@ -158,7 +173,7 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 		}
 	}
 	Thread1End:
-	SetWindowText(label2, "redeems: stopped              ");
+	updateContextMenuLine(1, "redeems: stopped");
 	return 0;
 }
 
@@ -184,28 +199,97 @@ void AddThirdPartyEmotes(sslsocket* psock, char* host, char* resource, char* pre
 }
 
 DWORD WINAPI Thread2(LPVOID lpParam) {
-	SetWindowText(label1, "   chat: init                ");
+	updateContextMenuLine(0, "checking oauth token...");
 	unsigned char buf[65536] = { 0 };
+
+	for (int attempt = 0; ; attempt++) {
+		sslsocket apisock;
+		if (sslsock_connect(&apisock, "api.twitch.tv", "443") != 0)
+			return -5;
+		buf[0] = 0;
+		str_vacat(buf, 3, "GET /helix/users HTTP/1.1\r\n"
+			"Host: api.twitch.tv\r\n"
+			"Client-Id: rc1t51ax9aj7r4m4nyjbnz2ri1e0a0\r\n"
+			"Authorization: Bearer ", iniGetValue(&config, "Twitch", "OAuthToken"), "\r\n\r\n");
+
+		if (sslsock_send(&apisock, buf, (unsigned int)strlen(buf)) != 0)
+			return -6;
+		int len = sslsock_recv(&apisock, buf, 65536);
+		sslsock_disconnect(&apisock);
+		if (memcmp(buf, "HTTP/1.1 200 OK", 10) != 0) {
+			if (MessageBoxA(NULL, "Failed to retrieve channel information. This is most likely caused by an invalid or expired OAuth token. Press OK to attempt to get a new token.", "caTTS Error", MB_OKCANCEL) != IDOK)
+				ExitProcess(0);
+			ShellExecuteA(NULL, "open", "https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=rc1t51ax9aj7r4m4nyjbnz2ri1e0a0&redirect_uri=http://localhost:3447&scope=chat%3Aread+chat%3Aedit+channel%3Aread%3Aredemptions", NULL, NULL, SW_SHOW);
+			SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+			if (serverSocket == -1)
+				return -2;
+			struct sockaddr_in fromAddr;
+			fromAddr.sin_family = AF_INET;
+			fromAddr.sin_port = htons(3447);
+			fromAddr.sin_addr.s_addr = INADDR_ANY;
+			int addrLen = sizeof(struct sockaddr_in);
+			if (bind(serverSocket, (struct sockaddr*)&fromAddr, addrLen) != 0)
+				return -3;
+			if (listen(serverSocket, 10) != 0)
+				return -4;
+			SOCKET clientSocket = accept(serverSocket, NULL, NULL);
+			for (int tmp, len = 0; (tmp = recv(clientSocket, buf + len, 65536, 0)) > 0; len += tmp) {
+				buf[len + tmp] = 0;
+				if (strstr(buf, "\r\n\r\n") > 0) {
+					char* found = strstr(buf, "access_token");
+					if (found) {
+						send(clientSocket, "HTTP/1.1 200 OK\r\nContent-Length: 45\r\nContent-Type: text/html\r\n\r\n<html>oauth token updated successfully</html>", 109, 0);
+						found[43] = 0;
+						iniSetValue(&config, "Twitch", "OAuthToken", found + 13);
+						break;
+					}
+					else {
+						send(clientSocket, "HTTP/1.1 200 OK\r\nContent-Length: 144\r\nContent-Type: text/html\r\n\r\n<html><body>redirecting...</body><script>window.location.replace(\"http://localhost:3447/&\" + window.location.hash.substring(1));</script></html>", 209, 0);
+						len = tmp = 0;
+					}
+				}
+			}
+			closesocket(clientSocket);
+			closesocket(serverSocket);
+			continue;
+		}
+		if (attempt > 0) {
+			char* id = strstr(buf, "\"id\":\"") + 6;
+			char* name = strstr(buf, "\"login\":\"") + 9;
+			if (id == (char*)6 || name == (char*)9) fatalError("asd");
+			*strchr(id, '\"') = 0;
+			*strchr(name, '\"') = 0;
+			iniSetValue(&config, "Twitch", "ChannelID", id);
+			iniSetValue(&config, "Twitch", "Channel", name);
+		}
+		break;
+	}
+
+	CreateThread(0, 0, Thread1, NULL, 0, NULL);
+
+	updateContextMenuLine(0, "fetching emotes...");
+
 	char emoteNames[1024] = { ' ', 0 };
 	AddThirdPartyEmotes(&ircsock, "api.betterttv.net", "/3/cached/emotes/global", "code\":\"", '\"', emoteNames);
+	buf[0] = 0;
 	str_vacat(buf, 2, "/3/cached/users/twitch/", iniGetValue(&config, "Twitch", "ChannelID"));
 	AddThirdPartyEmotes(&ircsock, "api.betterttv.net", buf, "code\":\"", '\"', emoteNames);
 	while (1) {
-		SetWindowText(label1, "   chat: connecting                ");
+		updateContextMenuLine(0, "chat: connecting...");
 		Sleep(1000);
 		sslsock_disconnect(&ircsock);
 		if (sslsock_connect(&ircsock, "irc.chat.twitch.tv", "6697") != 0)
 			continue;
 		buf[0] = 0;
-		int len = str_vacat(buf, 8, "PASS ", iniGetValue(&config, "Twitch", "OAuthToken"), "\r\n", "NICK ", iniGetValue(&config, "Twitch", "Channel"), "\r\nCAP REQ :twitch.tv/tags twitch.tv/commands\r\nJOIN #", iniGetValue(&config, "Twitch", "Channel"), "\r\n");
+		int len = str_vacat(buf, 8, "PASS oauth:", iniGetValue(&config, "Twitch", "OAuthToken"), "\r\n", "NICK ", iniGetValue(&config, "Twitch", "Channel"), "\r\nCAP REQ :twitch.tv/tags twitch.tv/commands\r\nJOIN #", iniGetValue(&config, "Twitch", "Channel"), "\r\n");
 		if (sslsock_send(&ircsock, buf, len) != 0)
 			continue;
 		if (!(len = sslsock_recv(&ircsock, buf, 65536)))
 			continue;
 		buf[len] = 0;
-		if (strstr(buf,":Welcome, GLHF!") == 0)
+		if (strstr(buf, ":Welcome, GLHF!") == 0)
 			goto Thread2End;
-		SetWindowText(label1, "   chat: listening              ");
+		updateContextMenuLine(0, "chat: connected");
 		char lastSpeakerName[32] = { 0 };
 		ULONGLONG lastSpeakerTime = 0;
 		char* ircMsgType = 0;
@@ -351,40 +435,8 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 		}
 	}
 	Thread2End:
-	SetWindowText(label1, "   chat: login fail            ");
+	updateContextMenuLine(0, "chat login fail");
 	return 0;
-}
-
-void Reload() {
-	//load config
-	free(config.data);
-	config = iniParse(configPath);
-	if (config.data == 0)
-		fatalError("failed to parse config");
-	free(bspConfig.data);
-	bspConfig = iniParse(iniGetValue(&config, "Twitch", "BSPlusConfig"));
-	if (bspConfig.data) {
-		int iRes = iniSetValue(&config, "Twitch", "OAuthToken", iniGetValue(&bspConfig, "Twitch", "Twitch.OAuthToken"));
-		iRes = iniSetValue(&config, "Twitch", "Channel", iniGetValue(&bspConfig, "Twitch", "Twitch.Channels"));
-	}
-	lowercase(iniGetValue(&config, "Twitch", "Channel"));
-	for (inikeyvalue* kv = iniGetSection(&config, "Nicknames"); kv->key; kv++) lowercase(kv->key);
-	for (inikeyvalue* kv = iniGetSection(&config, "WordReplacements"); kv->key; kv++) lowercase(kv->key);
-	for (inikeyvalue* kv = iniGetSection(&config, "UserVoices"); kv->key; kv++) lowercase(kv->key);
-	for (inikeyvalue* kv = iniGetSection(&config, "MutedUsers"); kv->key; kv++) lowercase(kv->key);
-	//clear tts buffer
-	for (int i = 0; i < TTS_QUEUE_COUNT; i++)
-		ttsQueue[i].message[0] = 0;
-	tts_last_message_pos = 0;
-	tts_playback_pos = 0;
-	//restart threads
-	if ((hThread0 != 0 && TerminateThread(hThread0, 0) == 0) ||
-		(hThread1 != 0 && TerminateThread(hThread1, 0) == 0) ||
-		(hThread2 != 0 && TerminateThread(hThread2, 0) == 0))
-		fatalError("failed to terminate thread");
-	hThread0 = hThread1 = hThread2 = 0;
-	hThread1 = CreateThread(0, 0, Thread1, NULL, 0, NULL);
-	hThread2 = CreateThread(0, 0, Thread2, NULL, 0, NULL);
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
@@ -394,20 +446,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
 	int ctrlId = GetDlgCtrlID((HWND)lParam);
 	switch (uMsg)
 	{
-	case WM_COMMAND: {
-		if (HIWORD(wParam) == BN_CLICKED) {
-			if (ctrlId == 10)
-				ShellExecuteA(NULL, "open", configPath, NULL, NULL, SW_SHOW);
-			if (ctrlId == 11)
-				Reload();
+	case 123: {
+		if (LOWORD(lParam) == WM_CONTEXTMENU) {
+			hMenu = CreatePopupMenu();
+			InsertMenu(hMenu, 0, MF_STRING | MF_DISABLED, 0, statusLines[0]);
+			InsertMenu(hMenu, 1, MF_STRING | MF_DISABLED, 0, statusLines[1]);
+			InsertMenu(hMenu, 2, MF_STRING, 1, "Config");
+			InsertMenu(hMenu, 4, MF_STRING, 3, "Exit");
+			SetForegroundWindow(hwnd);
+			TrackPopupMenu(hMenu, 0, GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam), 0, hwnd, NULL);
+			return 0;
 		}
-
 		break;
 	}
-	case WM_CTLCOLORSTATIC: {
-		SetTextColor((HDC)wParam, RGB(255, 255, 255));
-		SetBkColor((HDC)wParam, RGB(145, 70, 255));
-		return (LRESULT)hBrush;
+	case WM_COMMAND: {
+		if (wParam == 1) {
+			MessageBoxA(NULL, "Note: manual edits to the caTTS.ini config file will take effect after restarting the application. For realtime changes use the chat commands!", "caTTS", 0);
+			ShellExecuteA(NULL, "open", configFolder, NULL, NULL, SW_SHOW);
+		}
+		else if (wParam == 3) {
+			PostQuitMessage(0);
+		}
+		break;
 	}
 	case WM_DESTROY: {
 		PostQuitMessage(0);
@@ -422,58 +482,81 @@ int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hInstPrev, PSTR cmdline, int cmd
 #else
 void WinMainCRTStartup() {
 #endif
-	if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, (LPSTR)configPath) != S_OK)
+	if (FindWindowA("caTTS", NULL) != NULL)
+		fatalError("Already running");
+	if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, (LPSTR)configFolder) != S_OK)
 		fatalError("failed to get appdata path");
-	str_cat(configPath, "\\Catse");
-	CreateDirectoryA(configPath, NULL);
-	str_cat(configPath, "\\caTTS.ini");
-	HANDLE hFile;
-	if ((hFile = CreateFileA(configPath, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL)) != INVALID_HANDLE_VALUE) {
-		char defaultConfig[] = {
-		"[Azure]\n"
-		"SubscriptionKey = 00000000000000000000000000000000\n"
-		"Region = northeurope\n"
-		"\n"
-		"[Twitch]\n"
-		"OAuthToken = oauth:000000000000000000000000000000\n"
-		"Channel = channel_name\n"
-		"ChannelID = 123456789\n"
-		"BSPlusConfig = C:\\Users\\Example User\\AppData\\Local\\.beatsaberpluschatcore\\auth.ini\n"
-		"\n"
-		"[Misc]\n"
-		"BlockUrls = True\n"
-		"DontRepeatNameSeconds = 10\n"
-		"ReadEmotesCount = 2\n"
-		"DefaultVoice = en-US-AmberNeural\n"
-		"EffectPlaybackDevice = devicename ;Name can be partial, for example if you have a playback device called \"FiiO BTR3K Stereo\" you can just write BTR3K. If not found, default audio output is used.\n"
-		"VoicePlaybackDevice = devicename\n"
-		"VoiceVolume = 0 ;Volumes are a number between -10000 and 0\n"
-		"SoundEffectVolume = 0\n"
-		"RaidChatResponse = !so %name\n"
-		"RaidMessage = %name raided the channel with %num viewers\n"
-		"\n"
-		"[Nicknames]\n"
-		"example_username = nickname\n"
-		"\n"
-		"[WordReplacements]\n"
-		"example_word = replacement\n"
-		"\n"
-		"[UserVoices]\n"
-		"example_username = voicename +0Hz\n"
-		"\n"
-		"[MutedUsers]\n"
-		"example_username = True\n"
-		"\n"
-		"[SoundEffects]\n"
-		"Reward Name = path\\to\\soundfile.wav ;only supports wav files\n"
-		"\n"
-		"[RedeemMessages]\n"
-		"Default = %name redeemed %item for %cost points\n"
-		"Reward Name = unique message\n"
-		};
-		DWORD numWritten;
-		WriteFile(hFile, defaultConfig, (DWORD)strlen(defaultConfig), &numWritten, NULL);
-		CloseHandle(hFile);
+	str_cat(configFolder, "\\Catse");
+	CreateDirectoryA(configFolder, NULL);
+	char configPath[MAX_PATH] = { 0 };
+	str_vacat(configPath,2,configFolder, "\\caTTS.ini");
+
+	int cfgLoaded = iniParse(configPath, &config) == 0;
+	if (cfgLoaded) {
+		char* cfgVer = iniGetValue(&config, "Misc", "ConfigVersion");
+		if (!cfgVer || *cfgVer != '1') {
+			if (MessageBoxA(NULL, "An existing configuration file was found but is incompatible with this version. After pressing OK, the existing file will be renamed and a new default config will be created. You can manually transfer settings such as nicknames to the new file later.", "caTTS", MB_OKCANCEL) != IDOK) 
+				ExitProcess(0);
+			char oldConfigPath[MAX_PATH] = { 0 };
+			str_vacat(oldConfigPath, 2, configFolder, "\\caTTS_backup.ini");
+			if (MoveFileExA(configPath, oldConfigPath, MOVEFILE_REPLACE_EXISTING) == 0)
+				fatalError("Failed to rename existing config file");
+			free(config.data);
+			cfgLoaded = 0;
+		}
+	}
+	
+	if (!cfgLoaded) {
+		HANDLE hFile;
+		if ((hFile = CreateFileA(configPath, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL)) != INVALID_HANDLE_VALUE) {
+			char defaultConfig[] = {
+			"[Azure]\n"
+			"SubscriptionKey = 00000000000000000000000000000000\n"
+			"Region = northeurope\n"
+			"\n"
+			"[Twitch]\n"
+			"OAuthToken = 000000000000000000000000000000\n"
+			"Channel = channelname\n"
+			"ChannelID = 000000000\n"
+			"\n"
+			"[Misc]\n"
+			"BlockUrls = True\n"
+			"DontRepeatNameSeconds = 10\n"
+			"ReadEmotesCount = 2\n"
+			"DefaultVoice = en-US-AmberNeural\n"
+			"EffectPlaybackDevice = devicename ;Name can be partial, for example if you have a playback device called \"FiiO BTR3K Stereo\" you can just write BTR3K. If not found, default audio output is used.\n"
+			"VoicePlaybackDevice = devicename\n"
+			"VoiceVolume = 100\n"
+			"SoundEffectVolume = 100\n"
+			"RaidChatResponse = !so %name\n"
+			"RaidMessage = %name raided the channel with %num viewers\n"
+			"ConfigVersion = 1\n"
+			"\n"
+			"[Nicknames]\n"
+			"example_username = nickname\n"
+			"\n"
+			"[WordReplacements]\n"
+			"example_word = replacement\n"
+			"\n"
+			"[UserVoices]\n"
+			"example_username = voicename +0Hz\n"
+			"\n"
+			"[MutedUsers]\n"
+			"example_username = True\n"
+			"\n"
+			"[SoundEffects]\n"
+			"Reward Name = C:\\path\\to\\soundfile.wav ;only supports wav files\n"
+			"\n"
+			"[RedeemMessages]\n"
+			"Default = %name redeemed %item for %cost points\n"
+			"Reward Name = unique message\n"
+			};
+			DWORD numWritten;
+			WriteFile(hFile, defaultConfig, (DWORD)strlen(defaultConfig), &numWritten, NULL);
+			CloseHandle(hFile);
+		}
+		if (iniParse(configPath, &config) != 0)
+			fatalError("Failed to parse config");
 	}
 
 	HINSTANCE hInstance = GetModuleHandle(0);
@@ -481,24 +564,40 @@ void WinMainCRTStartup() {
 	wc.style = CS_OWNDC;
 	wc.lpfnWndProc = WindowProc;
 	wc.hInstance = hInstance;
-	wc.lpszClassName = "catts_class";
-	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(101));
-	wc.hbrBackground = CreateSolidBrush(RGB(145, 70, 255));
+	wc.lpszClassName = "caTTS";
 	RegisterClass(&wc);
-	HWND hwnd = CreateWindow("catts_class", "caTTS", WS_BORDER | WS_SYSMENU | WS_VISIBLE | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 288, 98, NULL, NULL, hInstance, NULL);
+	HWND hwnd = CreateWindowA("caTTS", "caTTS", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL,
+		hInstance, NULL);
 	if (hwnd == NULL)
 		fatalError("failed to create window");
 
-	label1 = CreateWindow("static", "   chat: null", WS_CHILD | WS_VISIBLE | SS_SIMPLE, 5, 10, 190, 16, hwnd, (HMENU)123, hInstance, NULL);
-	label2 = CreateWindow("static", "redeems: null", WS_CHILD | WS_VISIBLE | SS_SIMPLE, 5, 10 + 24, 190, 16, hwnd, (HMENU)124, hInstance, NULL);
-	HWND button1 = CreateWindow("BUTTON", "Config", WS_CHILD | WS_VISIBLE | BS_FLAT, 200, 8, 64, 20, hwnd, (HMENU)10, hInstance, NULL);
-	HWND button2 = CreateWindow("BUTTON", "Reload", WS_CHILD | WS_VISIBLE | BS_FLAT, 200, 32, 64, 20, hwnd, (HMENU)11, hInstance, NULL);
+	NOTIFYICONDATAA iconData = { 0 };
+	iconData.cbSize = sizeof(iconData);
+	iconData.hWnd = hwnd;
+	memcpy(iconData.szTip, "caTTS", 6);
+	iconData.uFlags = NIF_TIP | NIF_ICON | NIF_MESSAGE | NIF_SHOWTIP;
+	iconData.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(101));
+	iconData.uCallbackMessage = 123;
+	iconData.uID = 1;
+	iconData.uVersion = NOTIFYICON_VERSION_4;
+	if (!Shell_NotifyIconA(NIM_ADD, &iconData))
+		fatalError("failed to create tray icon");
+	Shell_NotifyIconA(NIM_SETVERSION, &iconData);
 
-	SendMessageA(label1, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FIXED_FONT), TRUE);
-	SendMessageA(label2, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FIXED_FONT), TRUE);
 
-	Reload();
+	for (inikeyvalue* kv = iniGetSection(&config, "Nicknames"); kv->key; kv++) lowercase(kv->key);
+	for (inikeyvalue* kv = iniGetSection(&config, "WordReplacements"); kv->key; kv++) lowercase(kv->key);
+	for (inikeyvalue* kv = iniGetSection(&config, "UserVoices"); kv->key; kv++) lowercase(kv->key);
+	for (inikeyvalue* kv = iniGetSection(&config, "MutedUsers"); kv->key; kv++) lowercase(kv->key);
+
+
+	voiceDeviceId = ds_init(iniGetValue(&config, "Misc", "VoicePlaybackDevice"));
+	effectDeviceId = ds_init(iniGetValue(&config, "Misc", "EffectPlaybackDevice"));
+	if (voiceDeviceId < 0 || effectDeviceId < 0)
+		fatalError("failed to initialize sound devices");
+
+	CreateThread(0, 0, Thread2, NULL, 0, NULL);
+
 
 	MSG msg = { 0 };
 	while (GetMessage(&msg, NULL, 0, 0) != 0)

@@ -4,7 +4,9 @@
 /*
  *  returns 0 on success
  */
-int speakText(char* text, char* voice, char* pitch, char* subscriptionKey, char* region, int volume, char* soundDeviceName) {
+int speakText(char* text, char* voice, char* pitch, char* subscriptionKey, char* region, int volume, int soundDeviceId) {
+    if (volume == 0)
+        return 0;
 
     static sslsocket* pSpeechSocket = 0;
     static ULONGLONG accessTokenTimestamp = 0;
@@ -28,8 +30,15 @@ int speakText(char* text, char* voice, char* pitch, char* subscriptionKey, char*
         if (sslsock_send(&tokenSocket, buf, len) != 0)
             return -2;
         int iRes = sslsock_recv_http(&tokenSocket, buf, MAX_FILESIZE);
-        if (memcmp(buf, "HTTP/1.1 200 OK", 15) != 0)
+        if (memcmp(buf, "HTTP/1.1 200 OK", 15) != 0) {
+            char* msgStart = strstr(buf, "message\":");
+            if (msgStart) {
+                msgStart += 11;
+                *strstr(msgStart, "\"") = 0;
+                MessageBoxA(NULL, msgStart, "caTTS Azure error", MB_SETFOREGROUND);
+            }
             return -3;
+        }
         int headerLen = (int)(strstr(buf, "\r\n\r\n") - buf) + 4;
         accessToken[0] = 0;
         str_cat(accessToken, buf + headerLen);
@@ -62,7 +71,7 @@ int speakText(char* text, char* voice, char* pitch, char* subscriptionKey, char*
                 if (memcmp(buf, "HTTP/1.1 200 OK", 15) != 0)
                     return -4;
                 int headerLen = (int)(strstr(buf, "\r\n\r\n") - buf) + 4;
-                play_sound(NULL, buf + headerLen, volume, soundDeviceName);
+                ds_playsound(soundDeviceId, NULL, buf + headerLen, volume);
                 return 0;
             }
         }
