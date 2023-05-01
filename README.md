@@ -26,7 +26,8 @@
 - [Create an Azure account](https://azure.microsoft.com/en-us/pricing/purchase-options/pay-as-you-go/)  
 <sup>(Note: you need to enter payment details but you won't have to pay anything as long as you stay within free service limits.)</sup>
 - [Create a Speech resource](https://ms.portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices) in the Azure portal. You can use the free pricing tier (F0) which gives you [500,000 characters free per month](https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/).
-- View the resource and navigate to "Keys and Endpoint" / "Manage keys" to get the required key and region name
+- View the resource and navigate to "Keys and Endpoint" / "Manage keys" to get the required key and region name  
+<sup>(Note: the correct region name is lowercase and contains no spaces)</sup>
 - [Here is a 1 minute video](https://www.youtube.com/watch?v=ZHtp69Vn6Oc) showing the whole process
 
 
