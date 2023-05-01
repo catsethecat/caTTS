@@ -61,7 +61,7 @@ int ds_init(char* deviceName) {
     return activeDeviceCount - 1;
 }
 
-int ds_playsound(int deviceId, char* filePath, char* fileData, int volume) {
+int ds_playsound(int deviceId, char* filePath, char* fileData, unsigned int fileSize, int volume, int maxDurationMs) {
     devbuf* dev = &activeDevices[deviceId];
 
     unsigned char* fileContents = fileData;
@@ -69,7 +69,6 @@ int ds_playsound(int deviceId, char* filePath, char* fileData, int volume) {
     unsigned char* data = NULL;
 
     if (filePath) {
-        DWORD fileSize;
         if (readFileAlloc(filePath, &fileContents, &fileSize, 0) != 0)
             return -1;
     }
@@ -82,6 +81,9 @@ int ds_playsound(int deviceId, char* filePath, char* fileData, int volume) {
     unsigned int sampleRate = *(int*)&header[24];
     unsigned int bitsPerSample = *(short*)&header[34];
     unsigned int dataSize = *(int*)&header[40];
+
+    if ((fileSize - 44) < dataSize)
+        return -4;
 
     //reuse the most recent buffer if we can
     long long bufferFormat = (long long)sampleRate + ((long long)numChannels << 32) + ((long long)bitsPerSample << 48);
@@ -133,7 +135,10 @@ int ds_playsound(int deviceId, char* filePath, char* fileData, int volume) {
     dev->lpDirectSoundBuffer8->lpVtbl->SetVolume(dev->lpDirectSoundBuffer8, -10000 + volume * 100); //-10000 is lowest
     dev->lpDirectSoundBuffer8->lpVtbl->SetCurrentPosition(dev->lpDirectSoundBuffer8, 0);
     dev->lpDirectSoundBuffer8->lpVtbl->Play(dev->lpDirectSoundBuffer8, 0, 0, 0);
-    Sleep(dataSize / (dev->avgBytesPerSec / 1000) - 50);
+    DWORD playbackDurationMs = dataSize / (dev->avgBytesPerSec / 1000) - 50;
+    if (playbackDurationMs > (DWORD)maxDurationMs)
+        playbackDurationMs = maxDurationMs;
+    Sleep(playbackDurationMs);
     dev->lpDirectSoundBuffer8->lpVtbl->Stop(dev->lpDirectSoundBuffer8);
     return 0;
 }

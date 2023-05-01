@@ -4,7 +4,7 @@
 /*
  *  returns 0 on success
  */
-int speakText(char* text, char* voice, char* pitch, char* subscriptionKey, char* region, int volume, int soundDeviceId) {
+int speakText(char* text, char* voice, char* subscriptionKey, char* region, int volume, int soundDeviceId, int maxDurationMs) {
     if (volume == 0)
         return 0;
 
@@ -57,8 +57,8 @@ int speakText(char* text, char* voice, char* pitch, char* subscriptionKey, char*
         }
         char* ssmlOffset = buf + 2048;
         ssmlOffset[0] = 0;
-        int ssmlLen = str_vacat(ssmlOffset, 7, "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='",voice,
-        "'><prosody pitch='",pitch,"'>",text,"</prosody></voice></speak>");
+        int ssmlLen = str_vacat(ssmlOffset, 5, "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='en-US'><voice name='",voice,
+        "'>",text,"</voice></speak>");
         buf[0] = 0;
         int len = str_vacat(buf, 5, "POST /cognitiveservices/v1 HTTP/1.1\r\nHost: ",region,
         ".tts.speech.microsoft.com\r\nUser-Agent: caTTS\r\nConnection: keep-alive\r\nX-Microsoft-OutputFormat: riff-24khz-16bit-mono-pcm\r\nAuthorization: Bearer ",
@@ -71,7 +71,7 @@ int speakText(char* text, char* voice, char* pitch, char* subscriptionKey, char*
                 if (memcmp(buf, "HTTP/1.1 200 OK", 15) != 0)
                     return -4;
                 int headerLen = (int)(strstr(buf, "\r\n\r\n") - buf) + 4;
-                ds_playsound(soundDeviceId, NULL, buf + headerLen, volume);
+                ds_playsound(soundDeviceId, NULL, buf + headerLen, iRes - headerLen, volume, maxDurationMs);
                 return 0;
             }
         }

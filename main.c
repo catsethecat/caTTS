@@ -21,7 +21,6 @@
 typedef struct {
 	char message[TTS_MAX_MESSAGE_LEN];
 	char* voice;
-	char* pitch;
 }ttsMessage;
 
 ttsMessage ttsQueue[TTS_QUEUE_COUNT];
@@ -30,7 +29,7 @@ int tts_last_message_pos = 0;
 int ttsBusy = 0;
 char configFolder[MAX_PATH];
 HMENU hMenu;
-char* statusLines[2] = {"line0", "line1"};
+char* statusLines[3] = {"line0", "line1", "line2"};
 HANDLE hThread0;
 HANDLE hThread1;
 HANDLE hThread2;
@@ -39,12 +38,14 @@ sslsocket pubsock;
 inifile config;
 int voiceDeviceId;
 int effectDeviceId;
+int characterCount;
 
 /*
-	-add option to limit tts message length
-	-add chat commands to allow moderators to control tts
-	-fix jank and better error checking
-	-other stuff i forgor
+	-tray icon color based on status
+	-potential bug: no error message if azure region is invalid? (pixil had a space in it)?
+	-more chat commands, better handling
+	-bug stripping emotes if theres unicode before them (irc emote index doesnt count all unicode bytes?)
+	-everything is jank fix everything lmao gl
 */
 
 void fatalError(char* msg) {
@@ -52,19 +53,38 @@ void fatalError(char* msg) {
 	ExitProcess(0);
 }
 
+// string must be static its never copied atm
+void updateContextMenuLine(int line, char* string) {
+	statusLines[line] = string;
+	ModifyMenuA(hMenu, line, MF_STRING | MF_DISABLED, 0, statusLines[line]);
+}
+
+void updateUsageDisplay() {
+	static char tmp[128] = "usage: ";
+	int len = uint_to_str(characterCount, tmp + 7);
+	*(short*)(tmp + 7 + len) = *(short*)" (";
+	int len2 = uint_to_str((characterCount * 100) / str_getint(iniGetValue(&config, "Misc", "MonthlyCharacterLimit")), tmp + 9 + len);
+	*(short*)(tmp + 9 + len + len2) = *(short*)"%)";
+	updateContextMenuLine(2, tmp);
+}
+
 void ttsThread() {
 	if (ttsBusy)
 		return;
 	ttsBusy = 1;
 	while (ttsQueue[tts_playback_pos].message[0] != 0) {
-		int res = speakText(ttsQueue[tts_playback_pos].message,
-			ttsQueue[tts_playback_pos].voice,
-			ttsQueue[tts_playback_pos].pitch,
-			iniGetValue(&config, "Azure", "SubscriptionKey"),
-			iniGetValue(&config, "Azure", "Region"),
-			str_getint(iniGetValue(&config, "Misc", "VoiceVolume")),
-			voiceDeviceId);
-
+		int msgLen = (int)strlen(ttsQueue[tts_playback_pos].message); //TODO we shouldnt need strlen, just keep track of the len during message processing
+		if ((characterCount+msgLen) < str_getint(iniGetValue(&config, "Misc", "MonthlyCharacterLimit"))) {
+			characterCount += msgLen;
+			updateUsageDisplay();
+			int res = speakText(ttsQueue[tts_playback_pos].message,
+				ttsQueue[tts_playback_pos].voice,
+				iniGetValue(&config, "Azure", "SubscriptionKey"),
+				iniGetValue(&config, "Azure", "Region"),
+				str_getint(iniGetValue(&config, "Misc", "VoiceVolume")),
+				voiceDeviceId,
+				str_getint(iniGetValue(&config, "Misc", "MaxAudioLengthSeconds"))*1000);
+		}
 		ttsQueue[tts_playback_pos].message[0] = 0;
 		tts_playback_pos = (tts_playback_pos + 1) % TTS_QUEUE_COUNT;
 	}
@@ -72,7 +92,7 @@ void ttsThread() {
 	ttsBusy = 0;
 }
 
-void ttsAddMessage(char* voice, char* pitch, int argc, ...) {
+void ttsAddMessage(char* voice, int argc, ...) {
 	va_list ap;
 	va_start(ap, argc);
 	char* c = ttsQueue[tts_last_message_pos].message;
@@ -80,15 +100,8 @@ void ttsAddMessage(char* voice, char* pitch, int argc, ...) {
 		c += str_cat(c, va_arg(ap,char*));
 	va_end(ap);
 	ttsQueue[tts_last_message_pos].voice = voice;
-	ttsQueue[tts_last_message_pos].pitch = pitch;
 	tts_last_message_pos = (tts_last_message_pos + 1) % TTS_QUEUE_COUNT;
 	CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ttsThread, NULL, 0, NULL);
-}
-
-// string must be static its never copied atm
-void updateContextMenuLine(int line, char* string) {
-	statusLines[line] = string;
-	ModifyMenuA(hMenu, line, MF_STRING | MF_DISABLED, 0, statusLines[line]);
 }
 
 DWORD WINAPI Thread0(LPVOID lpParam) {
@@ -155,7 +168,7 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 				username = nickname;
 			char* soundPath = iniGetValue(&config, "SoundEffects", title);
 			if (soundPath) {
-				ds_playsound(effectDeviceId, soundPath, NULL, str_getint(iniGetValue(&config, "Misc", "SoundEffectVolume")));
+				ds_playsound(effectDeviceId, soundPath, NULL, 0, str_getint(iniGetValue(&config, "Misc", "SoundEffectVolume")),9999999);
 				continue;
 			}
 			char* format = iniGetValue(&config, "RedeemMessages", title);
@@ -169,7 +182,7 @@ DWORD WINAPI Thread1(LPVOID lpParam) {
 			strrep(tmp, "%name", username);
 			strrep(tmp, "%item", title);
 			strrep(tmp, "%cost", cost);
-			ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), "+0Hz",1, tmp);
+			ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"),1, tmp);
 		}
 	}
 	Thread1End:
@@ -306,15 +319,58 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 				if (ircMsgType = strstr((char*)ircLineStart, "PRIVMSG")) {
 					char* name = rstrchr(ircLineStart, ircMsgType, '@') + 1;
 					char* message = strchr(ircMsgType, ':') + 1;
-					*(message - 1) = ' ';
-					memcpy(ircLineEnd, " ", 2);
 					*strchr(name, '.') = 0;
-					//skip if necessary
-					if (message[0] == '!')
+					//skip message or process commands
+					if (message[0] == '!') {
+						if (*(int*)message == *(int*)"!tts") {
+							message += 4;
+							if (memcmp(message, "help", 4) == 0) { // !ttshelp
+								char tmp[256] = { 0 };
+								len = str_vacat(tmp, 3, "PRIVMSG #", iniGetValue(&config, "Twitch", "Channel"), " :caTTS v1.3.0 https://github.com/catsethecat/caTTS\r\n");
+								sslsock_send(&ircsock, tmp, len);
+							}
+							char* tmp, *tmp2 = 0;
+							if (!(((tmp = strstr(ircLineStart, "=moderator")) && tmp < ircMsgType) ||
+								((tmp = strstr(ircLineStart, "=broadcaster")) && tmp < ircMsgType)))
+								continue;
+							tmp = strchr(message, ' ');
+							if (tmp) {
+								tmp++;
+								tmp2 = strchr(tmp, ' ');
+							}
+							else if (memcmp(message,"voice ",6) == 0) { // !ttsvoice
+								iniSetValue(&config, "Misc", "DefaultVoice", tmp);
+							}
+							else if (memcmp(message, "mute ", 5) == 0) { // !ttsmute
+								lowercase(tmp);
+								iniSetValue(&config, "MutedUsers", tmp, "True");
+							}
+							else if (memcmp(message, "unmute ", 7) == 0) { // !ttsunmute
+								lowercase(tmp);
+								iniSetValue(&config, "MutedUsers", tmp, "");
+							}
+							else if (memcmp(message, "nickname ", 9) == 0) { // !ttsnickname
+								lowercase(tmp);
+								if (tmp2) *tmp2 = 0;
+								else tmp2 = " ";
+								iniSetValue(&config, "Nicknames", tmp, tmp2 + 1);
+							}
+							else if (memcmp(message, "uservoice ", 10) == 0 && tmp2) { // !ttsuservoice
+								lowercase(tmp);
+								if (tmp2) *tmp2 = 0;
+								else tmp2 = " ";
+								iniSetValue(&config, "UserVoices", tmp, tmp2 + 1);
+							}
+						}
 						continue;
+					}
 					if (iniGetValue(&config, "MutedUsers", name))
 						continue;
-					//strip emotes
+					//check message len
+					if ((int)(ircLineEnd-message) > str_getint(iniGetValue(&config, "Misc", "MaxMessageLength"))) {
+						memcpy(message, "long message", 13);
+					}
+					//strip excess twitch emotes
 					int emoteCount = 0;
 					int allowedEmoteCount = str_getint(iniGetValue(&config, "Misc", "ReadEmotesCount"));
 					char* emotes = strstr(ircLineStart, "emotes=") + 7;
@@ -337,6 +393,9 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 							}
 						}
 					}
+					//strip excess 3rd party emotes
+					*(message - 1) = ' ';
+					*(short*)ircLineEnd = *(short*)" \0";
 					for (char* wordStart = message, *wordEnd; wordEnd = strchr(wordStart, ' '); wordStart = wordEnd + 1) {
 						char tmp = wordEnd[1];
 						wordEnd[1] = 0;
@@ -347,40 +406,40 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 						}
 						wordEnd[1] = tmp;
 					}
-					//remove nonprintable characters
+					*ircLineEnd = 0;
+					//strip excess UTF-8 symbols/emotes
+					for (unsigned char* c = message; *c; c++) {
+						if (*c >= 0xc0) {
+							int bytes = (*c >= 0xF0) ? 4 : (*c >= 0xE0) ? 3 : 2;
+							emoteCount++;
+							if (emoteCount > allowedEmoteCount)
+								memset(c, 1, bytes);
+							c += (bytes-1);
+						}
+					}
+
+					//remove '0x01' bytes which we used to mark all the excess emotes
+					//TODO this might conflict with some utf-8 symbols containing legit 0x01 bytes
 					int writePos = 0;
 					for (unsigned char* c = message; *c; c++) {
-						if (*c >= 32 && *c <= 126) {
+						if (*c != 1) {
 							message[writePos] = *c;
 							writePos++;
 						}
 					}
 					message[writePos] = 0;
-					lowercase(message);
+
 					//select voice
-					char* voice;
-					char* pitchOffset = "+0Hz";
-					char* userVoice = iniGetValue(&config, "UserVoices", name);
-					if (userVoice) {
-						char tmp[64] = { 0 };
-						str_cat(tmp, userVoice);
-						char* space = strchr(tmp, ' ');
-						if (space) {
-							*space = 0;
-							pitchOffset = space + 1;
-						}
-						voice = tmp;
-					}
-					else {
+					char* voice = iniGetValue(&config, "UserVoices", name);
+					if (!voice) 
 						voice = iniGetValue(&config, "Misc", "DefaultVoice");
-					}
 					//select nickname
 					char* nickname = iniGetValue(&config, "Nicknames", name);
 					if (nickname)
 						name = nickname;
 					//choose prefix
 					char msgPrefix[64] = { 0 };
-					str_vacat(msgPrefix, 2, name, " says");
+					str_vacat(msgPrefix, 2, name, " says ");
 					ULONGLONG dt = GetTickCount64() - lastSpeakerTime;
 					if (strcmp(name, lastSpeakerName) == 0 && dt < str_getint(iniGetValue(&config, "Misc", "DontRepeatNameSeconds")) * 1000)
 						msgPrefix[0] = 0;
@@ -389,7 +448,7 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 					lastSpeakerTime += dt;
 					//apply word replacements
 					for (inikeyvalue* kv = iniGetSection(&config, "WordReplacements"); kv->key; kv++)
-						strrep(message, kv->key, kv->value);
+						strrepl(message, kv->key, kv->value);
 					strrep(message, "&", "&amp;");
 					strrep(message, "<", "&lt;");
 					//remove urls
@@ -404,8 +463,12 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 							memcpy(cutStart, cutEnd, origLen - (cutEnd - message) + 1);
 						}
 					}
-					//
-					ttsAddMessage(voice, pitchOffset, 3, msgPrefix, " ", message);
+					//add SSML
+					char* ssmlPrefix = iniGetValue(&config, "Misc", "DefaultSSML");
+					char* ssmlSuffix = strstr(ssmlPrefix, "%text") + 5;
+					ssmlSuffix[-5] = 0;
+					ttsAddMessage(voice, 4, ssmlPrefix, msgPrefix, message, ssmlSuffix);
+					ssmlSuffix[-5] = '%';
 				}
 				if (ircMsgType = strstr((char*)ircLineStart, "USERNOTICE")) {
 					if (strstr(ircLineStart, "msg-id=raid") != 0) {
@@ -426,7 +489,7 @@ DWORD WINAPI Thread2(LPVOID lpParam) {
 							str_cat(tmp, raidMessage);
 							strrep(tmp, "%name", name);
 							strrep(tmp, "%num", viewerCount);
-							ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), "+0Hz", 1, tmp);
+							ttsAddMessage(iniGetValue(&config, "Misc", "DefaultVoice"), 1, tmp);
 						}
 					}
 					continue;
@@ -451,7 +514,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
 			hMenu = CreatePopupMenu();
 			InsertMenu(hMenu, 0, MF_STRING | MF_DISABLED, 0, statusLines[0]);
 			InsertMenu(hMenu, 1, MF_STRING | MF_DISABLED, 0, statusLines[1]);
-			InsertMenu(hMenu, 2, MF_STRING, 1, "Config");
+			InsertMenu(hMenu, 2, MF_STRING | MF_DISABLED, 0, statusLines[2]);
+			InsertMenu(hMenu, 3, MF_STRING, 1, "Config");
 			InsertMenu(hMenu, 4, MF_STRING, 3, "Exit");
 			SetForegroundWindow(hwnd);
 			TrackPopupMenu(hMenu, 0, GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam), 0, hwnd, NULL);
@@ -494,8 +558,8 @@ void WinMainCRTStartup() {
 	int cfgLoaded = iniParse(configPath, &config) == 0;
 	if (cfgLoaded) {
 		char* cfgVer = iniGetValue(&config, "Misc", "ConfigVersion");
-		if (!cfgVer || *cfgVer != '1') {
-			if (MessageBoxA(NULL, "An existing configuration file was found but is incompatible with this version. After pressing OK, the existing file will be renamed and a new default config will be created. You can manually transfer settings such as nicknames to the new file later.", "caTTS", MB_OKCANCEL) != IDOK) 
+		if (!cfgVer || *cfgVer != '2') {
+			if (MessageBoxA(NULL, "An existing configuration file was found but is incompatible with this version. After pressing OK, the existing file will be renamed and a new default config will be created. You can manually transfer settings to the new file later.", "caTTS", MB_OKCANCEL) != IDOK) 
 				ExitProcess(0);
 			char oldConfigPath[MAX_PATH] = { 0 };
 			str_vacat(oldConfigPath, 2, configFolder, "\\caTTS_backup.ini");
@@ -521,25 +585,34 @@ void WinMainCRTStartup() {
 			"\n"
 			"[Misc]\n"
 			"BlockUrls = True\n"
-			"DontRepeatNameSeconds = 10\n"
+			"DontRepeatNameSeconds = 15\n"
 			"ReadEmotesCount = 2\n"
+			"MaxMessageLength = 150\n"
+			"MaxAudioLengthSeconds = 10\n"
 			"DefaultVoice = en-US-AmberNeural\n"
+			"DefaultSSML = %text\n"
 			"EffectPlaybackDevice = devicename ;Name can be partial, for example if you have a playback device called \"FiiO BTR3K Stereo\" you can just write BTR3K. If not found, default audio output is used.\n"
 			"VoicePlaybackDevice = devicename\n"
 			"VoiceVolume = 100\n"
 			"SoundEffectVolume = 100\n"
 			"RaidChatResponse = !so %name\n"
 			"RaidMessage = %name raided the channel with %num viewers\n"
-			"ConfigVersion = 1\n"
+			"ConfigVersion = 2\n"
+			"CharacterCount = 0\n"
+			"CharacterCountMonth = 0\n"
+			"MonthlyCharacterLimit = 500000\n"
 			"\n"
 			"[Nicknames]\n"
-			"example_username = nickname\n"
+			"example_username = nickname ;All usernames must be lowercase everywhere in this config file\n"
 			"\n"
 			"[WordReplacements]\n"
 			"example_word = replacement\n"
 			"\n"
 			"[UserVoices]\n"
-			"example_username = voicename +0Hz\n"
+			"example_username = voicename\n"
+			"\n"
+			"[UserSSML]\n"
+			"example_username = <mstts:express-as style=\"whispering\">%text</mstts:express-as>\n"
 			"\n"
 			"[MutedUsers]\n"
 			"example_username = True\n"
@@ -584,13 +657,6 @@ void WinMainCRTStartup() {
 		fatalError("failed to create tray icon");
 	Shell_NotifyIconA(NIM_SETVERSION, &iconData);
 
-
-	for (inikeyvalue* kv = iniGetSection(&config, "Nicknames"); kv->key; kv++) lowercase(kv->key);
-	for (inikeyvalue* kv = iniGetSection(&config, "WordReplacements"); kv->key; kv++) lowercase(kv->key);
-	for (inikeyvalue* kv = iniGetSection(&config, "UserVoices"); kv->key; kv++) lowercase(kv->key);
-	for (inikeyvalue* kv = iniGetSection(&config, "MutedUsers"); kv->key; kv++) lowercase(kv->key);
-
-
 	voiceDeviceId = ds_init(iniGetValue(&config, "Misc", "VoicePlaybackDevice"));
 	effectDeviceId = ds_init(iniGetValue(&config, "Misc", "EffectPlaybackDevice"));
 	if (voiceDeviceId < 0 || effectDeviceId < 0)
@@ -598,6 +664,18 @@ void WinMainCRTStartup() {
 
 	CreateThread(0, 0, Thread2, NULL, 0, NULL);
 
+	char tmp[128];
+
+	SYSTEMTIME localTime;
+	GetLocalTime(&localTime);
+	if (localTime.wMonth != str_getint(iniGetValue(&config, "Misc", "CharacterCountMonth"))) {
+		uint_to_str(localTime.wMonth, tmp);
+		iniSetValue(&config, "Misc", "CharacterCountMonth", tmp);
+		iniSetValue(&config, "Misc", "CharacterCount", "0");
+	}
+
+	characterCount = str_getint(iniGetValue(&config, "Misc", "CharacterCount"));
+	updateUsageDisplay();
 
 	MSG msg = { 0 };
 	while (GetMessage(&msg, NULL, 0, 0) != 0)
@@ -606,6 +684,12 @@ void WinMainCRTStartup() {
 		DispatchMessage(&msg);
 	}
 	
+	
+	uint_to_str(characterCount, tmp);
+	iniSetValue(&config, "Misc", "CharacterCount", tmp);
+
+	Shell_NotifyIconA(NIM_DELETE, &iconData);
+
 	ExitProcess(0);
 }
 
