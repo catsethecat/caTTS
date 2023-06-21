@@ -20,6 +20,8 @@
 - Probably more optimized than any other Azure based TTS client
 - 47 KB standalone exe, no other files required besides a config file which is automatically created
 
+![image](https://cdn.discordapp.com/attachments/852088618594992159/1121143842469589053/ttsperformancecomparison.png)
+
 ## Getting started
 
 ### Prerequisites
